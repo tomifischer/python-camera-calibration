@@ -3,8 +3,7 @@
 
 from __future__ import print_function
 
-import math
-import cv2, sys
+import os, math, cv2, sys
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -44,6 +43,70 @@ def computeRMSE(errors):
 def toYamlArray(m):
   return "[ " + ", ".join( map(str, m.ravel()) ) + " ]"
 
+def saveImage(image, filename, prefix, output_dir):
+  new_filename = os.path.join(output_dir, prefix + '_' + os.path.basename( filename ))
+  print("saving:", new_filename)
+  cv2.imwrite(new_filename, image)
+
+def detectCorners(gray_image, corners_size, subpix_window_size):
+
+  found, corners = cv2.findChessboardCorners(gray_image, corners_size, cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE)
+
+  if not found:
+    return (False, None)
+
+  cv2.cornerSubPix(gray_image, corners, subpix_window_size, (-1, -1), subpix_criteria)
+
+  return (True, corners)
+
+def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, filenames):
+
+  fig = plt.figure()
+  ax = fig.add_subplot(111)
+
+  print()
+  print("rmse values for individual images:")
+
+  for i in range(len(img_points)):
+
+    errors = reprojectionErrors(img_points[i], pattern_corners, rvecs[i], tvecs[i], camera_matrix, dist_coeffs)
+
+    img_label, _ = os.path.splitext(os.path.basename(filenames[i]))
+    ax.scatter(errors[:,0], errors[:,1], marker='+', label=img_label)
+
+    print(img_label + ":", computeRMSE(errors))
+
+  handles, labels = ax.get_legend_handles_labels()
+  ax.legend(handles, labels)
+
+  ax.set_xlabel('x (px)')
+  ax.set_ylabel('y (px)')
+
+  fig.suptitle("reprojection errors")
+
+def undistortImages(filenames, camera_matrix, dist_coeffs, output_dir, fisheye=False):
+
+  for filename in filenames:
+
+    image = cv2.imread(filename, cv2.IMREAD_COLOR)
+    h, w = image.shape[:2]
+
+    if fisheye:
+
+      assert( false )
+
+    else:
+
+      #~ new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, (w, h), 1, (w, h))
+      #~ image_undistorted = cv2.undistort(image, camera_matrix, dist_coeffs, newCameraMatrix=new_camera_matrix)
+      image_undistorted = cv2.undistort(image, camera_matrix, dist_coeffs)
+      
+    ################
+    ## save image ##
+    ################
+
+    saveImage(image_undistorted, filename, "undistorted", output_dir)
+
 def main():
 
   ####################
@@ -53,7 +116,8 @@ def main():
   import argparse
 
   parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument("capture", type=str, help="OpenCV VideoCapture input format")
+  parser.add_argument("filenames", nargs='+', type=str, help="OpenCV VideoCapture input format")
+  parser.add_argument('-o', '--output_dir', type=str, default="output", help="output directory for debug images.")
   parser.add_argument('-r', '--rows', type=int, default=6, help="number of calibration chessboard rows")
   parser.add_argument('-c', '--cols', type=int, default=9, help="number of calibration chessboard columns")
   parser.add_argument('-w', '--window_size', type=int, default=5, help="half size of the subpixel search window (in px).")
@@ -65,6 +129,10 @@ def main():
   ##########################
   ## setup some variables ##
   ##########################
+
+  # prepare debug directory
+  if args.debug and not os.path.isdir( args.output_dir ):
+    os.mkdir( args.output_dir )
 
   if args.fisheye:
     assert cv2.__version__[0] == '3', 'The fisheye module requires opencv version >= 3.0.0'
@@ -84,15 +152,9 @@ def main():
   """
   subpix_window_size = (args.window_size, args.window_size)
 
-  #########################
-  ## open capture device ##
-  #########################
-
-  capture = cv2.VideoCapture( args.capture )
-
-  if not capture.isOpened():
-    print("Error opening video capture")
-    return 1
+  ###############################
+  ## detect chessboard corners ##
+  ###############################
 
   obj_points = []
   img_points = []
@@ -100,13 +162,13 @@ def main():
   # image size will be read from images and checked to be consistent.
   img_size = None
 
-  while capture.isOpened():
+  for filename in args.filenames:
 
-    ret, image = capture.read()
+    image = cv2.imread(filename, cv2.IMREAD_COLOR)
 
-    # no image means end of capture
-    if not ret:
-      break
+    if image is None:
+      print("Error: image", filename, "could not be read")
+      return 1
 
     if img_size is None:
       img_size = image.shape[:2][::-1]
@@ -119,17 +181,13 @@ def main():
     ####################
 
     # findChessboardCorners doesn't need to be grayscale, but cornerSubPix does
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    found, corners = cv2.findChessboardCorners(image, corners_size, cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE)
+    found, corners = detectCorners(gray_image, corners_size, subpix_window_size)
 
     if not found:
       print("Warning: no checkerboard found on image")
       continue
-
-    # nota: con esto anda peor, tal vez modificando el criteria?
-    # https://docs.opencv.org/3.3.1/dd/d1a/group__imgproc__feature.html#ga354e0d7c86d0d9da75de9b9701a9a87e
-    cv2.cornerSubPix(image, corners, subpix_window_size, (-1, -1), subpix_criteria)
 
     obj_points.append( pattern_corners )
     img_points.append( corners )
@@ -139,14 +197,8 @@ def main():
     ###########################
 
     if args.debug:
-
-      cv2.drawChessboardCorners(image, corners_size, corners, found)
-
-      cv2.imshow('distorted', image)
-      cv2.waitKey( 0 )
-
-  capture.release()
-  cv2.destroyAllWindows()
+      image = cv2.drawChessboardCorners(image, corners_size, corners, found)
+      saveImage(image, filename, "corners", args.output_dir)
 
   ######################
   ## Calibrate camera ##
@@ -188,26 +240,7 @@ def main():
   ## show reprojection errors ##
   ##############################
 
-  fig = plt.figure()
-  ax = fig.add_subplot(111)
-
-  print("rmse values for individual images:")
-
-  for i in range(n_patterns):
-
-    errors = reprojectionErrors(img_points[i], pattern_corners, rvecs[i], tvecs[i], camera_matrix, dist_coeffs)
-
-    ax.scatter(errors[:,0], errors[:,1], marker='+', label=str(i))
-
-    print(i, "\t:", computeRMSE(errors))
-
-  handles, labels = ax.get_legend_handles_labels()
-  ax.legend(handles, labels)
-
-  ax.set_xlabel('x (px)')
-  ax.set_ylabel('y (px)')
-
-  fig.suptitle("reprojection errors")
+  showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, args.filenames)
 
   # same metric as used for single image rmse
   print()
@@ -220,6 +253,7 @@ def main():
   print()
   print("camera_matrix:", toYamlArray(camera_matrix))
   print("dist_coeff:", toYamlArray(dist_coeffs))
+  print()
 
   #~ import yaml
   #~ with open("calib.yml", "w") as f:
@@ -229,37 +263,8 @@ def main():
   ## show rectified patterns ##
   #############################
 
-  # Can't read twice from the same capture :(
-  """
-  capture = cv2.VideoCapture( args.capture )
-
-  if not capture.isOpened():
-    print("Error opening video capture")
-    return 1
-
-  while capture.isOpened():
-
-    ret, image = capture.read()
-
-    if not ret:
-      break
-
-      h,  w = image.shape[:2]
-
-      if args.fisheye:
-
-        assert( false )
-
-      else:
-
-        new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, (w, h), 1, (w, h))
-        image_undistorted = cv2.undistort(image, camera_matrix, dist_coeffs, newCameraMatrix=new_camera_matrix)
-
-        cv2.imshow('undistorted', image_undistorted)
-        cv2.waitKey( 0 )
-
-  cv2.destroyAllWindows()
-  """
+  if args.debug:
+    undistortImages(args.filenames, camera_matrix, dist_coeffs, args.output_dir, args.fisheye)
 
   plt.show()
 
