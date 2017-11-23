@@ -22,13 +22,18 @@ calibration_stop_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
 
 fisheye_calibration_flags = cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC + cv2.fisheye.CALIB_CHECK_COND + cv2.fisheye.CALIB_FIX_SKEW
 
-def reprojectionErrors(img_points, pattern_corners, rvec, tvec, camera_matrix, dist_coeffs):
+def reprojectionErrors(img_points, pattern_corners, rvec, tvec, camera_matrix, dist_coeffs, fisheye=False):
   """
   Compute the distances between
     1. the reprojection of chessboard corners projected through a given calibration and
     2. the chessboard corners detected on the image
   """
-  reprojected_points, _ = cv2.projectPoints(pattern_corners, rvec, tvec, camera_matrix, dist_coeffs)
+
+  if fisheye:
+    reprojected_points, _ = cv2.fisheye.projectPoints(pattern_corners.reshape(1, -1, 3), rvec, tvec, camera_matrix, dist_coeffs)
+  else:
+    reprojected_points, _ = cv2.projectPoints(pattern_corners, rvec, tvec, camera_matrix, dist_coeffs)
+
   reprojected_points = reprojected_points.reshape(1, -1, 2)
   return (img_points - reprojected_points).reshape(-1, 2)
 
@@ -87,7 +92,7 @@ def calibratePatterns(img_points, pattern_corners, img_size, n_corners, fisheye=
 
     return cv2.calibrateCamera(obj_points, img_points, img_size, camera_matrix, dist_coeffs, rvecs, tvecs)
 
-def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, filenames):
+def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, filenames, fisheye=False):
 
   fig = plt.figure()
   ax = fig.add_subplot(111)
@@ -100,7 +105,7 @@ def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, t
 
   for i in range(len(img_points)):
 
-    errors = reprojectionErrors(img_points[i], pattern_corners, rvecs[i], tvecs[i], camera_matrix, dist_coeffs)
+    errors = reprojectionErrors(img_points[i], pattern_corners, rvecs[i], tvecs[i], camera_matrix, dist_coeffs, fisheye)
 
     img_label, _ = os.path.splitext(os.path.basename(filenames[i]))
     ax.scatter(errors[:,0], errors[:,1], marker='+', label=img_label)
@@ -249,7 +254,7 @@ def main():
   ## show reprojection errors ##
   ##############################
 
-  showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, args.filenames)
+  showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, args.filenames, args.fisheye)
 
   # same metric as used for single image rmse
   print()
