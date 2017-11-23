@@ -103,6 +103,9 @@ def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, t
   fig = plt.figure()
   ax = fig.add_subplot(111)
 
+  limit_circle = plt.Circle((0, 0), 1.0, color='r', linestyle='--', fill=False, alpha=0.5)
+  ax.add_artist( limit_circle )
+
   print()
   print("rmse values for individual images:")
 
@@ -120,6 +123,14 @@ def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, t
 
   ax.set_xlabel('x (px)')
   ax.set_ylabel('y (px)')
+
+  ax.set_aspect('equal')
+
+  #~ xmin, xmax = ax.get_xlim()
+  #~ ax.set_xlim( min(xmin, -1.1), max(1.1, xmax) )
+
+  #~ ymin, ymax = ax.get_ylim()
+  #~ ax.set_ylim( min(ymin, -1.1), max(1.1, ymax) )
 
   fig.suptitle("reprojection errors")
 
