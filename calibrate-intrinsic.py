@@ -17,7 +17,9 @@ TermCriteria(int type, int maxCount, double epsilon)
  - maxCount: The maximum number of iterations or elements to compute.
  - epsilon: The desired accuracy or change in parameters at which the iterative algorithm stops.
 """
-subpix_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.1)
+iterative_stop_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.1)
+
+fisheye_calibration_flags = cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC + cv2.fisheye.CALIB_CHECK_COND + cv2.fisheye.CALIB_FIX_SKEW
 
 def reprojectionErrors(img_points, pattern_corners, rvec, tvec, camera_matrix, dist_coeffs):
   """
@@ -55,38 +57,35 @@ def detectCorners(gray_image, corners_size, subpix_window_size):
   if not found:
     return (False, None)
 
-  cv2.cornerSubPix(gray_image, corners, subpix_window_size, (-1, -1), subpix_criteria)
+  cv2.cornerSubPix(gray_image, corners, subpix_window_size, (-1, -1), iterative_stop_criteria)
 
   return (True, np.asarray(corners, dtype='float32').reshape(1, -1, 2))
 
 def calibratePatterns(img_points, pattern_corners, img_size, n_corners, fisheye=False):
 
+  # TODO add optional initial guess
+
   # number of detected patterns
   n_patterns = len( img_points )
 
+  data_type = np.float64 if fisheye else np.float32
+
   # the pattern corners are the same for each image. create one for each
   # detected pattern and reshape everything to the expected shape.
-  obj_points = np.asarray([ pattern_corners ] * n_patterns, dtype='float32').reshape(n_patterns, 1, -1, 3)
-
-  # initial guess
-  #~ camera_matrix = np.array([
-    #~ [872.34347227, 0., 951.22313648],
-    #~ [0. , 881.1423476, 545.82512402],
-    #~ [0., 0., 1.]
-  #~ ])
+  obj_points = np.asarray([ pattern_corners ] * n_patterns, dtype=data_type).reshape(n_patterns, 1, -1, 3)
 
   camera_matrix = np.eye( 3 )
   dist_coeffs = np.zeros( 4 )
 
   if fisheye:
 
-    rvecs = np.zeros((n_patterns, 1, 1, 3), dtype='float64')
-    tvecs = np.zeros((n_patterns, 1, 1, 3), dtype='float64')
+    rvecs = np.zeros((n_patterns, 1, 1, 3), dtype=data_type)
+    tvecs = np.zeros((n_patterns, 1, 1, 3), dtype=data_type)
 
-    #~ obj_points = np.asarray([obj_points], dtype='float64').reshape(-1, 1, n_corners, 3)
-    #~ img_points = np.asarray([img_points], dtype='float64').reshape(-1, 1, n_corners, 2)
+    obj_points = np.asarray([obj_points], dtype=data_type).reshape(-1, 1, n_corners, 3)
+    img_points = np.asarray([img_points], dtype=data_type).reshape(-1, 1, n_corners, 2)
 
-    rmse, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.fisheye.calibrate(obj_points, img_points, img_size, camera_matrix, dist_coeffs)
+    return cv2.fisheye.calibrate(obj_points, img_points, img_size, camera_matrix, dist_coeffs, rvecs, tvecs, fisheye_calibration_flags, iterative_stop_criteria)
 
   else:
 
