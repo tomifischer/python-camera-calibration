@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
 from __future__ import print_function
@@ -19,13 +19,13 @@ TermCriteria(int type, int maxCount, double epsilon)
 """
 subpix_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.1)
 
-def reprojectionErrors(img_points, obj_points, rvec, tvec, camera_matrix, dist_coeffs):
+def reprojectionErrors(img_points, pattern_corners, rvec, tvec, camera_matrix, dist_coeffs):
   """
   Compute the distances between
     1. the reprojection of chessboard corners projected through a given calibration and
     2. the chessboard corners detected on the image
   """
-  reprojected_points, _ = cv2.projectPoints(obj_points, rvec, tvec, camera_matrix, dist_coeffs)
+  reprojected_points, _ = cv2.projectPoints(pattern_corners, rvec, tvec, camera_matrix, dist_coeffs)
   reprojected_points = reprojected_points.reshape(1, -1, 2)
   return (img_points - reprojected_points).reshape(-1, 2)
 
@@ -57,7 +57,47 @@ def detectCorners(gray_image, corners_size, subpix_window_size):
 
   cv2.cornerSubPix(gray_image, corners, subpix_window_size, (-1, -1), subpix_criteria)
 
-  return (True, corners)
+  return (True, np.asarray(corners, dtype='float32').reshape(1, -1, 2))
+
+def calibratePatterns(img_points, pattern_corners, img_size, n_corners, fisheye=False):
+
+  # number of detected patterns
+  n_patterns = len( img_points )
+
+  # the pattern corners are the same for each image. create one for each
+  # detected pattern and reshape everything to the expected shape.
+  obj_points = np.asarray([ pattern_corners ] * n_patterns, dtype='float32').reshape(n_patterns, 1, -1, 3)
+
+  # initial guess
+  #~ camera_matrix = np.array([
+    #~ [872.34347227, 0., 951.22313648],
+    #~ [0. , 881.1423476, 545.82512402],
+    #~ [0., 0., 1.]
+  #~ ])
+
+  camera_matrix = np.eye( 3 )
+  dist_coeffs = np.zeros( 4 )
+
+  if fisheye:
+
+    rvecs = np.zeros((n_patterns, 1, 1, 3), dtype='float64')
+    tvecs = np.zeros((n_patterns, 1, 1, 3), dtype='float64')
+
+    #~ obj_points = np.asarray([obj_points], dtype='float64').reshape(-1, 1, n_corners, 3)
+    #~ img_points = np.asarray([img_points], dtype='float64').reshape(-1, 1, n_corners, 2)
+
+    rmse, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.fisheye.calibrate(obj_points, img_points, img_size, camera_matrix, dist_coeffs)
+
+  else:
+
+    #~ obj_points = np.asarray([obj_points], dtype='float32').reshape(-1, 1, n_corners, 3)
+    #~ img_points = np.asarray([img_points], dtype='float32').reshape(-1, 1, n_corners, 2)
+
+    rvecs = np.zeros((n_patterns, 1, 1, 3), dtype='float32')
+    tvecs = np.zeros((n_patterns, 1, 1, 3), dtype='float32')
+
+    # doc: https://docs.opencv.org/3.1.0/d9/d0c/group__calib3d.html#ga687a1ab946686f0d85ae0363b5af1d7b
+    return cv2.calibrateCamera(obj_points, img_points, img_size, camera_matrix, dist_coeffs, rvecs, tvecs)
 
 def showErrors(pattern_corners, img_points, camera_matrix, dist_coeffs, rvecs, tvecs, filenames):
 
@@ -137,7 +177,7 @@ def main():
   if args.fisheye:
     assert cv2.__version__[0] == '3', 'The fisheye module requires opencv version >= 3.0.0'
 
-    # number of internal rows and columns of corners
+  # number of internal rows and columns of corners
   board_rows = args.rows
   board_cols = args.cols
   n_corners = board_rows * board_cols
@@ -156,7 +196,6 @@ def main():
   ## detect chessboard corners ##
   ###############################
 
-  obj_points = []
   img_points = []
 
   # image size will be read from images and checked to be consistent.
@@ -189,7 +228,6 @@ def main():
       print("Warning: no checkerboard found on image")
       continue
 
-    obj_points.append( pattern_corners )
     img_points.append( corners )
 
     ###########################
@@ -204,37 +242,7 @@ def main():
   ## Calibrate camera ##
   ######################
 
-  # number of detected patterns
-  n_patterns = len(img_points)
-  #print("found", n_patterns, "patterns")
-
-  # initial guess
-  #~ camera_matrix = np.array([
-    #~ [872.34347227, 0., 951.22313648],
-    #~ [0. , 881.1423476, 545.82512402],
-    #~ [0., 0., 1.]
-  #~ ])
-
-  camera_matrix = np.eye( 3 )
-  dist_coeffs = np.zeros( 4 )
-
-  if args.fisheye:
-
-    obj_points = np.asarray([obj_points], dtype='float64').reshape(-1, 1, n_corners, 3)
-    img_points = np.asarray([img_points], dtype='float64').reshape(-1, 1, n_corners, 2)
-
-    rmse, camera_matrix, dist_coeffs, _, _ = cv2.fisheye.calibrate(obj_points, img_points, img_size, camera_matrix, dist_coeffs)
-
-  else:
-
-    obj_points = np.asarray([obj_points], dtype='float32').reshape(-1, 1, n_corners, 3)
-    img_points = np.asarray([img_points], dtype='float32').reshape(-1, 1, n_corners, 2)
-
-    rvecs = np.zeros((n_patterns, 1, 1, 3), dtype=np.float32)
-    tvecs = np.zeros((n_patterns, 1, 1, 3), dtype=np.float32)
-
-    # doc: https://docs.opencv.org/3.1.0/d9/d0c/group__calib3d.html#ga687a1ab946686f0d85ae0363b5af1d7b
-    rmse, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(obj_points, img_points, img_size, camera_matrix, dist_coeffs, rvecs, tvecs)
+  rmse, camera_matrix, dist_coeffs, rvecs, tvecs = calibratePatterns(img_points, pattern_corners, img_size, n_corners, args.fisheye)
 
   ##############################
   ## show reprojection errors ##
@@ -254,10 +262,6 @@ def main():
   print("camera_matrix:", toYamlArray(camera_matrix))
   print("dist_coeff:", toYamlArray(dist_coeffs))
   print()
-
-  #~ import yaml
-  #~ with open("calib.yml", "w") as f:
-    #~ yaml.dump({"camera_matrix": camera_matrix, "dist_coeff": dist_coeffs}, f)
 
   #############################
   ## show rectified patterns ##
