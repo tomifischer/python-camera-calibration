@@ -78,11 +78,13 @@ def calibratePatterns(img_points, pattern_corners, img_size, n_corners, fisheye=
   # detected pattern and reshape everything to the expected shape.
   obj_points = np.asarray([ pattern_corners ] * n_patterns, dtype=np.float32).reshape(n_patterns, 1, -1, 3)
 
-  camera_matrix = np.eye( 3 )
-  dist_coeffs = np.zeros( 4 )
+  # have to be declared because they will be input/output parameters,
+  # probably inherited from the C++ interface.
+  camera_matrix = None
+  dist_coeffs = None
 
-  rvecs = np.zeros((n_patterns, 1, 1, 3), dtype=np.float64)
-  tvecs = np.zeros((n_patterns, 1, 1, 3), dtype=np.float64)
+  rvecs = None
+  tvecs = None
 
   if fisheye:
 
@@ -137,12 +139,15 @@ def undistortImages(filenames, camera_matrix, dist_coeffs, output_dir, fisheye=F
 
     if fisheye:
 
-      assert( False )
+      new_camera_matrix = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(camera_matrix, dist_coeffs, (w, h), R=np.eye(3), balance=1.0)
+      image_undistorted = cv2.fisheye.undistortImage(image, camera_matrix, dist_coeffs, Knew=new_camera_matrix)
 
     else:
 
-      #~ new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, (w, h), 1, (w, h))
-      #~ image_undistorted = cv2.undistort(image, camera_matrix, dist_coeffs, newCameraMatrix=new_camera_matrix)
+      # TODO this does not work as expected ...
+      #~ new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(cameraMatrix=camera_matrix, distCoeffs=dist_coeffs, imageSize=(w, h), alpha=0.0, newImgSize=(w, h))
+      #~ image_undistorted = cv2.undistort(src=image, cameraMatrix=camera_matrix, distCoeffs=dist_coeffs, newCameraMatrix=new_camera_matrix)
+
       image_undistorted = cv2.undistort(image, camera_matrix, dist_coeffs)
       
     ################
